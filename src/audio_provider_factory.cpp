@@ -123,8 +123,11 @@ std::unique_ptr<agi::AudioProvider> GetAudioProvider(fs::path const& filename,
 	bool needs_cache = provider->NeedsCache();
 
 	// Give it a converter if needed
-	if (provider->GetBytesPerSample() != 2 || provider->GetSampleRate() < 32000 || provider->GetChannels() != 1)
-		provider = CreateConvertAudioProvider(std::move(provider));
+	// The audio display always works on a mono mix, but the players can play
+	// stereo audio, so only downmix all the way to mono if asked to
+	const int max_channels = OPT_GET("Audio/Stereo Playback")->GetBool() ? 2 : 1;
+	if (provider->GetBytesPerSample() != 2 || provider->AreSamplesFloat() || provider->GetSampleRate() < 32000 || provider->GetChannels() > max_channels)
+		provider = CreateConvertAudioProvider(std::move(provider), max_channels);
 
 	// Change provider to RAM/HD cache if needed
 	auto cache = OPT_GET("Audio/Cache/Type")->GetInt();

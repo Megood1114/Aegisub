@@ -19,10 +19,12 @@
 #include <libaegisub/endian.h>
 #include <libaegisub/log.h>
 
+#include <algorithm>
 #include <limits>
 #include <numeric>
 #include <ranges>
 #include <span>
+#include <vector>
 
 using namespace agi;
 
@@ -140,6 +142,70 @@ public:
 	}
 };
 
+/// More-than-stereo 16-bit signed machine-endian -> stereo 16-bit signed machine endian converter
+///
+/// Assumes the usual channel order (front left, front right, front center,
+/// LFE, then the surround channels in left/right pairs).
+class StereoDownmixAudioProvider final : public AudioProviderWrapper {
+	int src_channels;
+	std::vector<float> left_gain;
+	std::vector<float> right_gain;
+	mutable std::vector<int16_t> src_buf;
+
+public:
+	StereoDownmixAudioProvider(std::unique_ptr<AudioProvider> src) : AudioProviderWrapper(std::move(src)) {
+		src_channels = channels;
+		channels = 2;
+
+		left_gain.assign(src_channels, 0.f);
+		right_gain.assign(src_channels, 0.f);
+		const float half = 0.70710678f;
+		for (int c = 0; c < src_channels; ++c) {
+			if (c == 0)
+				left_gain[c] = 1.f;
+			else if (c == 1)
+				right_gain[c] = 1.f;
+			else if (c == 2)
+				left_gain[c] = right_gain[c] = half; // center
+			else if (c == 3 && src_channels >= 6)
+				continue;                            // LFE is dropped
+			else if (c % 2 == 0)
+				left_gain[c] = half;
+			else
+				right_gain[c] = half;
+		}
+
+		// Normalize so that the downmix can never clip
+		float left_sum = 0.f, right_sum = 0.f;
+		for (int c = 0; c < src_channels; ++c) {
+			left_sum += left_gain[c];
+			right_sum += right_gain[c];
+		}
+		const float norm = std::max(left_sum, right_sum);
+		for (int c = 0; c < src_channels; ++c) {
+			left_gain[c] /= norm;
+			right_gain[c] /= norm;
+		}
+	}
+
+	void FillBuffer(void *buf, int64_t start, int64_t count) const override {
+		src_buf.resize(count * src_channels);
+		source->GetAudio(&src_buf[0], start, count);
+
+		auto dst = static_cast<int16_t*>(buf);
+		for (int64_t i = 0; i < count; ++i) {
+			float left = 0.f, right = 0.f;
+			for (int c = 0; c < src_channels; ++c) {
+				const float sample = src_buf[i * src_channels + c];
+				left += sample * left_gain[c];
+				right += sample * right_gain[c];
+			}
+			dst[i * 2] = static_cast<int16_t>(left);
+			dst[i * 2 + 1] = static_cast<int16_t>(right);
+		}
+	}
+};
+
 /// Sample doubler with linear interpolation for the samples provider
 /// Requires 16-bit mono input
 class SampleDoublingAudioProvider final : public AudioProviderWrapper {
@@ -178,7 +244,7 @@ public:
 }
 
 namespace agi {
-std::unique_ptr<AudioProvider> CreateConvertAudioProvider(std::unique_ptr<AudioProvider> provider) {
+std::unique_ptr<AudioProvider> CreateConvertAudioProvider(std::unique_ptr<AudioProvider> provider, int max_channels) {
 	// Ensure 16-bit audio with proper endianness
 	if (provider->AreSamplesFloat()) {
 		LOG_D("audio_provider") << "Converting float to S16";
@@ -192,8 +258,17 @@ std::unique_ptr<AudioProvider> CreateConvertAudioProvider(std::unique_ptr<AudioP
 		provider = std::make_unique<BitdepthConvertAudioProvider<int16_t>>(std::move(provider));
 	}
 
-	// We currently only support mono audio
-	if (provider->GetChannels() != 1) {
+	// The sample doubler below only handles mono audio
+	if (provider->GetSampleRate() < 32000)
+		max_channels = 1;
+
+	// Keep at most max_channels channels (the audio display always works on a
+	// mono mix, see AudioProvider::GetInt16MonoAudio)
+	if (max_channels >= 2 && provider->GetChannels() > 2) {
+		LOG_D("audio_provider") << "Downmixing to stereo from " << provider->GetChannels() << " channels";
+		provider = std::make_unique<StereoDownmixAudioProvider>(std::move(provider));
+	}
+	else if (max_channels < 2 && provider->GetChannels() != 1) {
 		LOG_D("audio_provider") << "Downmixing to mono from " << provider->GetChannels() << " channels";
 		provider = std::make_unique<DownmixAudioProvider>(std::move(provider));
 	}

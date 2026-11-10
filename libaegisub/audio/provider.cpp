@@ -26,6 +26,7 @@
 #include <span>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace agi {
 void AudioProvider::GetAudioWithVolume(void *buf, int64_t start, int64_t count, double volume) const {
@@ -36,8 +37,30 @@ void AudioProvider::GetAudioWithVolume(void *buf, int64_t start, int64_t count, 
 		throw agi::InternalError("GetAudioWithVolume called on unconverted audio stream");
 
 	auto buffer = static_cast<int16_t *>(buf);
-	for (size_t i = 0; i < (size_t)count; ++i)
+	for (size_t i = 0; i < (size_t)count * channels; ++i)
 		buffer[i] = util::mid(-0x8000, static_cast<int>(buffer[i] * volume + 0.5), 0x7FFF);
+}
+
+void AudioProvider::GetInt16MonoAudio(int16_t *buf, int64_t start, int64_t count) const {
+	if (bytes_per_sample != 2 || float_samples)
+		throw agi::InternalError("GetInt16MonoAudio called on unconverted audio stream");
+
+	if (channels == 1) {
+		GetAudio(buf, start, count);
+		return;
+	}
+	if (count <= 0) return;
+
+	std::vector<int16_t> src(static_cast<size_t>(count) * channels);
+	GetAudio(src.data(), start, count);
+
+	// Just average the channels together
+	for (int64_t i = 0; i < count; ++i) {
+		int sum = 0;
+		for (int c = 0; c < channels; ++c)
+			sum += src[i * channels + c];
+		buf[i] = static_cast<int16_t>(sum / channels);
+	}
 }
 
 void AudioProvider::ZeroFill(void *buf, int64_t count) const {

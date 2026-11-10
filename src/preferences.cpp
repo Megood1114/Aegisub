@@ -454,6 +454,7 @@ void Advanced_Audio(wxTreebook *book, Preferences *parent) {
 
 	wxArrayString apl_choice = to_wx(AudioPlayerFactory::GetClasses());
 	p->OptionChoice(expert, _("Audio player"), apl_choice, "Audio/Player");
+	p->OptionAdd(expert, _("Stereo playback (takes effect when audio is reloaded)"), "Audio/Stereo Playback");
 
 	auto cache = p->PageSizer(_("Cache"));
 	const wxString ct_arr[3] = { _("None (NOT RECOMMENDED)"), _("RAM"), _("Hard Disk") };

@@ -82,6 +82,7 @@
 		},
 		"Spectrum" : true,
 		"Start Drag Sensitivity" : 8,
+		"Stereo Playback" : true,
 		"Track Cursor" : {
 			"Font Face" : ""
 		},

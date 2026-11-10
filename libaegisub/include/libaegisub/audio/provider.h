@@ -45,6 +45,10 @@ public:
 
 	void GetAudio(void *buf, int64_t start, int64_t count) const;
 	void GetAudioWithVolume(void *buf, int64_t start, int64_t count, double volume) const;
+	/// Get audio downmixed to a single channel, for consumers which only care
+	/// about the signal and not about playback (waveform, spectrum, ...).
+	/// Only valid on 16-bit integer providers.
+	void GetInt16MonoAudio(int16_t *buf, int64_t start, int64_t count) const;
 
 	int64_t GetNumSamples()     const { return num_samples; }
 	int64_t GetDecodedSamples() const { return decoded_samples; }
@@ -87,7 +91,8 @@ class BackgroundRunner;
 std::unique_ptr<AudioProvider> CreateDummyAudioProvider(agi::fs::path const& filename, BackgroundRunner *);
 std::unique_ptr<AudioProvider> CreatePCMAudioProvider(agi::fs::path const& filename, BackgroundRunner *);
 
-std::unique_ptr<AudioProvider> CreateConvertAudioProvider(std::unique_ptr<AudioProvider> source_provider);
+/// @param max_channels Maximum number of channels to keep (1 or 2); anything above is downmixed
+std::unique_ptr<AudioProvider> CreateConvertAudioProvider(std::unique_ptr<AudioProvider> source_provider, int max_channels = 1);
 std::unique_ptr<AudioProvider> CreateLockAudioProvider(std::unique_ptr<AudioProvider> source_provider);
 std::unique_ptr<AudioProvider> CreateHDAudioProvider(std::unique_ptr<AudioProvider> source_provider,
                                                      agi::fs::path const& dir);
