@@ -40,6 +40,7 @@
 
 #include <libaegisub/fs.h>
 
+#include <algorithm>
 #include <map>
 
 namespace {
@@ -164,15 +165,21 @@ void FFmpegSourceAudioProvider::LoadAudio(agi::fs::path const& filename) {
 			throw agi::AudioProviderError("unknown or unsupported sample format");
 	}
 
-	if (channels > 1 || bytes_per_sample != 2) {
+	// Keep stereo audio stereo if stereo playback is enabled (the audio
+	// display works on a mono mix of it either way)
+	const int max_channels = OPT_GET("Audio/Stereo Playback")->GetBool() ? 2 : 1;
+	if (channels > max_channels || bytes_per_sample != 2 || float_samples) {
+		const int out_channels = std::min(channels, max_channels);
 		std::unique_ptr<FFMS_ResampleOptions, decltype(&FFMS_DestroyResampleOptions)>
 			opt(FFMS_CreateResampleOptions(AudioSource), FFMS_DestroyResampleOptions);
-		opt->ChannelLayout = FFMS_CH_FRONT_CENTER;
+		opt->ChannelLayout = out_channels == 2
+			? FFMS_CH_FRONT_LEFT | FFMS_CH_FRONT_RIGHT
+			: FFMS_CH_FRONT_CENTER;
 		opt->SampleFormat = FFMS_FMT_S16;
 
 		// Might fail if FFMS2 wasn't built with libavresample
 		if (!FFMS_SetOutputFormatA(AudioSource, opt.get(), nullptr)) {
-			channels = 1;
+			channels = out_channels;
 			bytes_per_sample = 2;
 			float_samples = false;
 		}
